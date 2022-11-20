@@ -3,11 +3,10 @@ use std::marker::PhantomData;
 use halo2_proofs::circuit::Value;
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{Cell, Chip, Layouter, SimpleFloorPlanner},
-    plonk::{Advice, Assigned, Circuit, Column, ConstraintSystem, Error, Fixed, Instance},
+    circuit::{Chip, Layouter, SimpleFloorPlanner},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Fixed, Instance},
     poly::Rotation,
 };
-use halo2_proofs::pasta::Fp;
 use halo2_proofs::plonk::Selector;
 
 #[derive(Clone, Debug)]
@@ -42,19 +41,18 @@ impl<Field: FieldExt> Chip<Field> for FChip<Field> {
 }
 
 impl<Field: FieldExt> FChip<Field> {
-    fn construct(config: <Self as Chip<Field>>::Config) -> Self {
-        Self {
-            config,
-            _marker: PhantomData,
-        }
-    }
-
     fn configure(
         meta: &mut ConstraintSystem<Field>,
         advice: [Column<Advice>; 3],
         instance: Column<Instance>,
         constant: Column<Fixed>,
     ) -> <Self as Chip<Field>>::Config {
+        meta.enable_equality(instance);
+        meta.enable_constant(constant);
+        for column in &advice {
+            meta.enable_equality(*column);
+        }
+
         let s_add = meta.selector();
         let s_mul = meta.selector();
         let s_add_c = meta.selector();
@@ -92,13 +90,13 @@ impl<Field: FieldExt> FChip<Field> {
         });
 
         MyConfig {
-            advice: advice,
-            instance: instance,
-            constant: constant,
-            s_add: s_add,
-            s_mul: s_mul,
-            s_add_c: s_add_c,
-            s_mul_c: s_mul_c,
+            advice,
+            instance,
+            constant,
+            s_add,
+            s_mul,
+            s_add_c,
+            s_mul_c,
         }
     }
 }
@@ -127,17 +125,17 @@ impl<Field: FieldExt> Circuit<Field> for MyCircuit<Field> {
     fn synthesize(
         &self, config: Self::Config, mut layouter: impl Layouter<Field>
     ) -> Result<(), Error> {
-        // handling input region
-        let (loaded_u, loaded_v) = layouter.assign_region(
-            || "input region",
-            |mut region| {
-                let loaded_u = region.assign_advice(|| "private u",
-                        config.advice[0].clone(), 0, || self.u)?;
-                let loaded_v = region.assign_advice(|| "private v",
-                        config.advice[0].clone(), 0, || self.v)?;
-                Ok((loaded_u.cell(), loaded_v.cell()))
-            }
-        ).unwrap();
+        // // handling input region
+        // let (loaded_u, loaded_v) = layouter.assign_region(
+        //     || "input region",
+        //     |mut region| {
+        //         let loaded_u = region.assign_advice(|| "private u",
+        //                 config.advice[0].clone(), 0, || self.u)?;
+        //         let loaded_v = region.assign_advice(|| "private v",
+        //                 config.advice[1].clone(), 0, || self.v)?;
+        //         Ok((loaded_u.cell(), loaded_v.cell()))
+        //     }
+        // )?;
 
         // handling multiplication region
         let t1 = self.u * self.u;
@@ -162,8 +160,7 @@ impl<Field: FieldExt> Circuit<Field> for MyCircuit<Field> {
                 // second row
                 config.s_mul.enable(&mut region, 1)?;
                 let x_a2 = region.assign_advice(|| "x_a2",
-                    config.advice[0].clone(), 1, || self.u
-                )?;
+                    config.advice[0].clone(), 1, || self.u)?;
                 let x_b2 = region.assign_advice(|| "x_b2",
                     config.advice[1].clone(), 1, || self.v)?;
                 let x_c2 = region.assign_advice(|| "x_c2",
@@ -172,11 +169,11 @@ impl<Field: FieldExt> Circuit<Field> for MyCircuit<Field> {
                 // third row
                 config.s_mul_c.enable(&mut region, 2)?;
                 let x_a3 = region.assign_advice(|| "x_a3",
-                    config.advice[0].clone(), 2, || self.u)?;
+                    config.advice[0].clone(), 2, || t2)?;
                 region.assign_fixed(|| "constant 3",
                     config.constant.clone(), 2, || Value::known(Field::from(3)))?;
                 let x_c3 = region.assign_advice(|| "x_c3",
-                    config.advice[2].clone(), 2, || t2)?;
+                    config.advice[2].clone(), 2, || t3)?;
 
                 Ok((
                     (x_a1.cell(), x_b1.cell(), x_c1.cell()),
@@ -184,7 +181,7 @@ impl<Field: FieldExt> Circuit<Field> for MyCircuit<Field> {
                     (x_a3.cell(), x_c3.cell())
                 ))
             }
-        ).unwrap();
+        )?;
 
         let t4 = t1 + t3;
         let t5 = t4 + self.v;
@@ -228,10 +225,31 @@ impl<Field: FieldExt> Circuit<Field> for MyCircuit<Field> {
                     (x_a6.cell(), x_c6.cell())
                 ))
             }
-        ).unwrap();
+        )?;
 
         // t6 is result, assign instance
-        layouter.constrain_instance(x_c6, config.instance.clone(), 0)?;
+        layouter.constrain_instance(x_c6, config.instance, 0)?;
+
+        // now set copy constraints
+        layouter.assign_region(|| "equality",
+            |mut region| {
+                region.constrain_equal(x_a1, x_a2)?;
+                region.constrain_equal(x_a2, x_b1)?;
+
+                region.constrain_equal(x_b2, x_b5)?;
+
+                region.constrain_equal(x_a4, x_c1)?;
+
+                region.constrain_equal(x_a3, x_c2)?;
+
+                region.constrain_equal(x_b4, x_c3)?;
+
+                region.constrain_equal(x_a5, x_c4)?;
+
+                region.constrain_equal(x_a6, x_c5)?;
+                Ok(())
+            }
+        )?;
         Ok(())
     }
 }
@@ -239,6 +257,7 @@ impl<Field: FieldExt> Circuit<Field> for MyCircuit<Field> {
 fn main() {
     env::set_var("RUST_BACKTRACE", "full");
     use halo2_proofs::dev::MockProver;
+    use halo2_proofs::halo2curves::bn256::Fr as Fp;
 
     let u = Fp::from(3);
     let v = Fp::from(7);
