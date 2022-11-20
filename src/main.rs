@@ -125,18 +125,6 @@ impl<Field: FieldExt> Circuit<Field> for MyCircuit<Field> {
     fn synthesize(
         &self, config: Self::Config, mut layouter: impl Layouter<Field>
     ) -> Result<(), Error> {
-        // // handling input region
-        // let (loaded_u, loaded_v) = layouter.assign_region(
-        //     || "input region",
-        //     |mut region| {
-        //         let loaded_u = region.assign_advice(|| "private u",
-        //                 config.advice[0].clone(), 0, || self.u)?;
-        //         let loaded_v = region.assign_advice(|| "private v",
-        //                 config.advice[1].clone(), 0, || self.v)?;
-        //         Ok((loaded_u.cell(), loaded_v.cell()))
-        //     }
-        // )?;
-
         // handling multiplication region
         let t1 = self.u * self.u;
         let t2 = self.u * self.v;
