@@ -9,6 +9,7 @@ use halo2_proofs::{
 };
 use halo2_proofs::plonk::Selector;
 
+// specify necessary columns in the main table
 #[derive(Clone, Debug)]
 struct MyConfig {
     advice: [Column<Advice>; 3],
@@ -47,16 +48,20 @@ impl<Field: FieldExt> FChip<Field> {
         instance: Column<Instance>,
         constant: Column<Fixed>,
     ) -> <Self as Chip<Field>>::Config {
+        // specify columns used for proving copy constraints
         meta.enable_equality(instance);
         meta.enable_constant(constant);
         for column in &advice {
             meta.enable_equality(*column);
         }
 
+        // extract columns with respect to selectors
         let s_add = meta.selector();
         let s_mul = meta.selector();
         let s_add_c = meta.selector();
         let s_mul_c = meta.selector();
+
+        // define addition gate
         meta.create_gate("add", |meta| {
             let s_add = meta.query_selector(s_add);
             let lhs = meta.query_advice(advice[0], Rotation::cur());
@@ -65,6 +70,7 @@ impl<Field: FieldExt> FChip<Field> {
             vec![s_add * (lhs + rhs - out)]
         });
 
+        // define multiplication gate
         meta.create_gate("mul", |meta| {
             let s_mul = meta.query_selector(s_mul);
             let lhs = meta.query_advice(advice[0], Rotation::cur());
@@ -73,6 +79,7 @@ impl<Field: FieldExt> FChip<Field> {
             vec![s_mul * (lhs * rhs - out)]
         });
 
+        // define addition with constant gate
         meta.create_gate("add with constant", |meta| {
             let s_add_c = meta.query_selector(s_add_c);
             let lhs = meta.query_advice(advice[0], Rotation::cur());
@@ -81,6 +88,7 @@ impl<Field: FieldExt> FChip<Field> {
             vec![s_add_c * (lhs + fixed - out)]
         });
 
+        // define multiplication with constant gate
         meta.create_gate("mul with constant", |meta| {
             let s_mul_c = meta.query_selector(s_mul_c);
             let lhs = meta.query_advice(advice[0], Rotation::cur());
@@ -129,6 +137,8 @@ impl<Field: FieldExt> Circuit<Field> for MyCircuit<Field> {
         let t1 = self.u * self.u;
         let t2 = self.u * self.v;
         let t3 = t2 * Value::known(Field::from(3));
+
+        // define multiplication region
         let (
             (x_a1, x_b1, x_c1),
             (x_a2, x_b2, x_c2),
@@ -174,6 +184,8 @@ impl<Field: FieldExt> Circuit<Field> for MyCircuit<Field> {
         let t4 = t1 + t3;
         let t5 = t4 + self.v;
         let t6 = t5 + Value::known(Field::from(5));
+
+        // define addition region
         let (
             (x_a4, x_b4, x_c4),
             (x_a5, x_b5, x_c5),
@@ -218,23 +230,23 @@ impl<Field: FieldExt> Circuit<Field> for MyCircuit<Field> {
         // t6 is result, assign instance
         layouter.constrain_instance(x_c6, config.instance, 0)?;
 
-        // now set copy constraints
+        // enforce copy constraints
         layouter.assign_region(|| "equality",
             |mut region| {
-                region.constrain_equal(x_a1, x_a2)?;
-                region.constrain_equal(x_a2, x_b1)?;
+                region.constrain_equal(x_a1, x_a2)?; // namely, x_a1 = x_a2
+                region.constrain_equal(x_a2, x_b1)?; // namely, x_a2 = x_b1
 
-                region.constrain_equal(x_b2, x_b5)?;
+                region.constrain_equal(x_b2, x_b5)?; // namely, x_b2 = x_b5
 
-                region.constrain_equal(x_a4, x_c1)?;
+                region.constrain_equal(x_a4, x_c1)?; // namely, x_a4 = x_c1
 
-                region.constrain_equal(x_a3, x_c2)?;
+                region.constrain_equal(x_a3, x_c2)?; // namely, x_a3 = x_c2
 
-                region.constrain_equal(x_b4, x_c3)?;
+                region.constrain_equal(x_b4, x_c3)?; // namely, x_b4 = x_c3
 
-                region.constrain_equal(x_a5, x_c4)?;
+                region.constrain_equal(x_a5, x_c4)?; // namely, x_a5 = x_c4
 
-                region.constrain_equal(x_a6, x_c5)?;
+                region.constrain_equal(x_a6, x_c5)?; // namely, x_a6 = x_c5
                 Ok(())
             }
         )?;
